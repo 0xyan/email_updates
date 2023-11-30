@@ -1,1 +1,6 @@
 .env
+btc_prices.txt
+eth_prices.txt
+equity_txt.txt
+time_txt.txt
+daily_email.txt
