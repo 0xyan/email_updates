@@ -12,6 +12,7 @@ import os
 from binance import AsyncClient
 from dotenv import load_dotenv
 from files_handling import datetime_list, btceth_lists, equity_list
+from beta_var import beta_calc
 
 load_dotenv()
 
@@ -169,6 +170,7 @@ async def email_doc_creation(
     gross_exposure_pct,
     net_exposure_pct,
     total_equity,
+    beta,
 ):
     # calculating returns
     last_day_pnl = perf_calc(df, "equity", 2)
@@ -219,7 +221,9 @@ async def email_doc_creation(
 
     ############### EMAIL DOC
 
-    daily_email = open("daily_email.txt", "w")
+    daily_email = open(
+        r"/Users/mac/Desktop/GMY/python_projects/email_updates/daily_email.txt", "w"
+    )
     daily_email.write(f"Recorded {df.shape[0]} days\n")
     daily_email.write(f"Sharpe ratio: {sharpe}\n")
     daily_email.write(f"Sortino ratio: {sortino}\n")
@@ -247,27 +251,32 @@ async def email_doc_creation(
         f"\n BTC\t\t{week_vol_btc}%\t\t{month_vol_btc}% \t\t{total_vol_btc}%\n"
     )
 
-    daily_email.write("\n\n Positions: \n")
-    daily_email.write("\n Perps:")
+    total_beta_exp = 0
+    daily_email.write("\n\t\tAmount\t\tSize\t\tBeta\tBeta exp.\t24h ret.\n")
+    daily_email.write(" Perps:")
     for k, v in perp_pos_dict.items():
         token_price_k = await token_price(client, k)
+        daily_change_k = await daily_change(client, k)
+        size_k = round(v * token_price_k, 2)
+        beta_exposure_k = round(beta[k] * size_k, 2)
         daily_email.write(
-            f" \n {k} \t {float(v)} \t ${round(v * token_price_k,2)} \t {daily_change(k)} %"
+            f" \n {k}\t{float(v)}\t\t${size_k}\t{round(beta[k], 2)}\t${beta_exposure_k}\t{daily_change_k}%"
         )
+        total_beta_exp += beta_exposure_k
 
     if margin_pos_dict:
         daily_email.write("\n\n Margin:")
         for k, v in margin_pos_dict.items():
             token_price_k = await token_price(client, k)
             daily_email.write(
-                f" \n {k} \t {float(v)} \t ${round(v * token_price_k,2)} \t {daily_change(k)} %"
+                f" \n {k} \t {float(v)} \t ${round(v * token_price_k,2)} \t {daily_change(client, k)} %"
             )
 
     daily_email.write("\n \n Exposure: \n")
-    # daily_email.write(f" \n Gross: {gross_exposure}")
     daily_email.write(f" \n Gross%: {round(gross_exposure_pct, 2)}%")
-    # daily_email.write(f"\n Net : {net_exposure}")
-    daily_email.write(f"\n Net% : {round(net_exposure_pct, 2)}% \n")
+    daily_email.write(f"\n Net%: {round(net_exposure_pct, 2)}%")
+    daily_email.write(f"\n Beta exp.%: {round(total_beta_exp/total_equity*100,2)}%")
+    daily_email.write(f"\n Beta exp.$: ${round(total_beta_exp, 2)} \n")
 
     daily_email.write(f"\nTotal equity: ${total_equity}")
 
@@ -318,9 +327,12 @@ async def main():
     ethprice = round(float(ethprice), 2)
     btc_series, eth_series = btceth_lists(btcprice, ethprice)
     equity_series = equity_list(total_equity)
+
+    beta = await beta_calc(client, perp_pos_dict)
+
     df = dataframe(datetime_series, equity_series, btc_series, eth_series)
     date_time = plot(df)
-    email_doc_creation(
+    await email_doc_creation(
         df,
         client,
         perp_pos_dict,
@@ -328,6 +340,7 @@ async def main():
         gross_exposure_pct,
         net_exposure_pct,
         total_equity,
+        beta,
     )
     mail_send(date_time)
 
