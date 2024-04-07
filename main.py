@@ -26,17 +26,41 @@ def binance_init():
 
 
 async def daily_change(client, symbol):
-    for i in await client.futures_ticker():
+
+    daily_change = None
+
+    future_tickers = await client.future_tickers()
+    for i in future_tickers:
         if i["symbol"] == symbol:
             daily_change = round(float(i["priceChangePercent"]), 2)
-        else:
-            continue
-    return daily_change
+            return daily_change
+
+    spot_tickers = await client.get_tickers()
+    for i in spot_tickers:
+        if i["symbol"] == symbol:
+            daily_change = round(float(i["priceChangePercent"]), 2)
+            return daily_change
+
+    if daily_change is None:
+        print(f"can not fetch daily change for {symbol}")
 
 
 async def token_price(client, symbol):
-    ticker = await client.futures_symbol_ticker(symbol=symbol)
-    price = round(float(ticker["price"]), 2)
+    price = None
+
+    try:
+        ticker = await client.futures_symbol_ticker(symbol=symbol)
+        price = round(float(ticker["price"]), 2)
+    except Exception as e:
+        pass
+
+    if price is None:
+        try:
+            ticker = await client.get_symbol_ticker(symbol=symbol)
+            price = round(float(ticker["price"]))
+        except Exception as e:
+            print(f"Error fetching spot ticker for {symbol}: {e}")
+
     return price
 
 
@@ -189,9 +213,7 @@ async def email_doc_creation(
     total_btc_return = perf_calc(df, "btc_price", -0)
 
     # calculating stdevs
-    week_vol_strategy = round(
-        df["strategy_return"].tail(7).std() * (365**0.5) * 100, 2
-    )
+    week_vol_strategy = round(df["strategy_return"].tail(7).std() * (365**0.5) * 100, 2)
     month_vol_strategy = round(
         df["strategy_return"].tail(30).std() * (365**0.5) * 100, 2
     )
@@ -268,8 +290,9 @@ async def email_doc_creation(
         daily_email.write("\n\n Margin:")
         for k, v in margin_pos_dict.items():
             token_price_k = await token_price(client, k)
+            daily_change_k = await daily_change(client, k)
             daily_email.write(
-                f" \n {k} \t {float(v)} \t ${round(v * token_price_k,2)} \t {daily_change(client, k)} %"
+                f" \n {k} \t {float(v)} \t ${round(v * token_price_k,2)} \t {daily_change_k} %"
             )
 
     daily_email.write("\n \n Exposure: \n")
@@ -317,6 +340,7 @@ async def main():
     client = binance_init()
     total_equity = await get_balance(client)
     perp_pos_dict, margin_pos_dict, all_positions = await get_positions(client)
+    print(all_positions)
     net_exposure_pct, gross_exposure_pct = await get_exposure(
         client, all_positions, total_equity
     )
